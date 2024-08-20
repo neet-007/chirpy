@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 func main() {
@@ -82,11 +83,11 @@ func handlerValidatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type returnVal struct {
-		Valid bool `json:"valid"`
+		CleanedBody string `json:"cleaned_body"`
 	}
 
 	returnVal_ := returnVal{
-		Valid: true,
+		CleanedBody: cleanProfane(params.Body),
 	}
 
 	json, err := json.Marshal(returnVal_)
@@ -125,4 +126,22 @@ func (cfg *apiConfig) handlerReset(w http.ResponseWriter, r *http.Request) {
 	cfg.fileserverHits = 0
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Hits reset to 0"))
+}
+
+func cleanProfane(s string) string {
+	words := strings.Split(s, " ")
+	profanes := []string{"kerfuffle",
+		"sharbert",
+		"fornax",
+	}
+
+	for index, word := range words {
+		for _, profane := range profanes {
+			if strings.ToLower(word) == profane {
+				words[index] = "****"
+			}
+		}
+	}
+
+	return strings.Join(words, " ")
 }
