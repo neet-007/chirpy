@@ -65,6 +65,40 @@ func (cfg *ApiConfig) HandlerGetChirpById(w http.ResponseWriter, r *http.Request
 	return
 }
 
+func (cfg *ApiConfig) HandlerDeleteChirp(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("chat_id")
+	if idStr == "" {
+		return
+	}
+
+	id, err := strconv.Atoi(idStr)
+
+	if err != nil {
+		return
+	}
+
+	tokenHeader := r.Header.Get("Authorization")
+
+	if tokenHeader == "" {
+		fmt.Printf("no auth token")
+		return
+	}
+
+	tokenFields := strings.Fields(tokenHeader)
+	if len(tokenFields) != 2 {
+		fmt.Printf("auth token length is not 2")
+		return
+	}
+
+	err = cfg.db.DeleteChirp(id, tokenFields[1], cfg.jwtSecret)
+	if err != nil {
+		w.WriteHeader(http.StatusNetworkAuthenticationRequired)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (cfg *ApiConfig) HandlerValidatePost(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		chirps, err := cfg.db.GetChirps()
@@ -124,7 +158,20 @@ func (cfg *ApiConfig) HandlerValidatePost(w http.ResponseWriter, r *http.Request
 
 	CleanedBody := cleanProfane(params.Body)
 
-	newData, err := cfg.db.CreateChirp(CleanedBody)
+	tokenHeader := r.Header.Get("Authorization")
+
+	if tokenHeader == "" {
+		fmt.Printf("no auth token")
+		return
+	}
+
+	tokenFields := strings.Fields(tokenHeader)
+	if len(tokenFields) != 2 {
+		fmt.Printf("auth token length is not 2")
+		return
+	}
+
+	newData, err := cfg.db.CreateChirp(CleanedBody, tokenFields[1], cfg.jwtSecret)
 	fmt.Println(newData)
 	if err != nil {
 		fmt.Printf("Error creating chirp value: %s", err)

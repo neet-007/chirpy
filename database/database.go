@@ -23,8 +23,9 @@ type DB struct {
 }
 
 type Chirp struct {
-	Id   int
-	Body string
+	Id       int
+	Body     string
+	AutherId int
 }
 
 type User struct {
@@ -70,7 +71,7 @@ func NewDB(path string) (*DB, error) {
 }
 
 // CreateChirp creates a new chirp and saves it to disk
-func (db *DB) CreateChirp(body string) (Chirp, error) {
+func (db *DB) CreateChirp(body string, token string, secret []byte) (Chirp, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 
@@ -79,9 +80,34 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 		return Chirp{}, err
 	}
 
+	token_, err := jwt.ParseWithClaims(token, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+
+	if err != nil {
+		return Chirp{}, err
+	}
+
+	claims, ok := token_.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token_.Valid {
+		return Chirp{}, errors.New("invalid token")
+	}
+
+	idStr := claims.Subject
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return Chirp{}, err
+	}
+
+	user, ok := dbStructure.UsersById[id]
+
+	if !ok {
+		return Chirp{}, errors.New("user not found")
+	}
 	chirp := Chirp{
-		Id:   len(dbStructure.Chirps) + 1,
-		Body: body,
+		Id:       len(dbStructure.Chirps) + 1,
+		Body:     body,
+		AutherId: user.Id,
 	}
 
 	dbStructure.Chirps[chirp.Id] = chirp
@@ -375,6 +401,55 @@ func (db *DB) GetChirpById(id int) (Chirp, error) {
 	}
 
 	return returnChirp, nil
+
+}
+
+func (db *DB) DeleteChirp(id int, token string, secret []byte) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	returnChirp, ok := dbStructure.Chirps[id]
+
+	if !ok {
+		return nil
+	}
+
+	token_, err := jwt.ParseWithClaims(token, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	claims, ok := token_.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token_.Valid {
+		return errors.New("invalid token")
+	}
+
+	idStr := claims.Subject
+	id, err = strconv.Atoi(idStr)
+	if err != nil {
+		return err
+	}
+
+	if id != returnChirp.AutherId {
+		return errors.New("user not authirized")
+	}
+
+	delete(dbStructure.Chirps, returnChirp.Id)
+
+	err = db.writeDB(dbStructure)
+	if err != nil {
+		return err
+	}
+
+	return nil
 
 }
 
