@@ -141,9 +141,10 @@ func (cfg *ApiConfig) HandlerValidatePost(w http.ResponseWriter, r *http.Request
 	w.Write(json)
 }
 
-func (cfg *ApiConfig) HandlerCreateUser(w http.ResponseWriter, r *http.Request) {
+func (cfg *ApiConfig) HandlerLogUser(w http.ResponseWriter, r *http.Request) {
 	type parammeter struct {
-		Body string `json:"email"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -156,8 +157,42 @@ func (cfg *ApiConfig) HandlerCreateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	newData, err := cfg.db.CreateUser(params.Body)
-	fmt.Println(newData)
+	newData, err := cfg.db.GetUser(params.Email, params.Password)
+	if err != nil {
+		fmt.Printf("Error creating chirp value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	json, err := json.Marshal(newData)
+	if err != nil {
+		fmt.Printf("Error encoding return value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(json)
+}
+
+func (cfg *ApiConfig) HandlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	type parammeter struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parammeter{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		fmt.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	newData, err := cfg.db.CreateUser(params.Email, params.Password)
 	if err != nil {
 		fmt.Printf("Error creating chirp value: %s", err)
 		w.WriteHeader(http.StatusInternalServerError)

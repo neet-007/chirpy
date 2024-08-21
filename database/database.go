@@ -2,7 +2,9 @@ package database
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"golang.org/x/crypto/bcrypt"
 	"io/fs"
 	"os"
 	"sort"
@@ -20,13 +22,19 @@ type Chirp struct {
 }
 
 type User struct {
+	Id       int
+	Email    string
+	Password string
+}
+
+type ReturnedUser struct {
 	Id    int
 	Email string
 }
 
 type DBStructure struct {
-	Chirps map[int]Chirp `json:"chirps"`
-	Users  map[int]User  `json:"users"`
+	Chirps map[int]Chirp   `json:"chirps"`
+	Users  map[string]User `json:"users"`
 }
 
 // NewDB creates a new database connection
@@ -71,27 +79,63 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 	return chirp, nil
 }
 
-func (db *DB) CreateUser(email string) (User, error) {
+func (db *DB) CreateUser(email string, password string) (ReturnedUser, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 
 	dbStructure, err := db.loadDB()
 	if err != nil {
-		return User{}, err
+		return ReturnedUser{}, err
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+
+	if err != nil {
+		return ReturnedUser{}, err
 	}
 
 	user := User{
-		Id:    len(dbStructure.Users) + 1,
-		Email: email,
+		Id:       len(dbStructure.Users) + 1,
+		Email:    email,
+		Password: string(hashedPassword),
 	}
 
-	dbStructure.Users[user.Id] = user
+	dbStructure.Users[user.Email] = user
 	err = db.writeDB(dbStructure)
 	if err != nil {
-		return User{}, fmt.Errorf("writing db error %w", err)
+		return ReturnedUser{}, fmt.Errorf("writing db error %w", err)
 	}
 
-	return user, nil
+	return ReturnedUser{
+		Id:    user.Id,
+		Email: user.Email,
+	}, nil
+}
+
+func (db *DB) GetUser(email string, password string) (ReturnedUser, error) {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return ReturnedUser{}, err
+	}
+
+	returnUser, ok := dbStructure.Users[email]
+
+	if !ok {
+		return ReturnedUser{}, errors.New("user not found")
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(returnUser.Password), []byte(password))
+	if err != nil {
+		return ReturnedUser{}, fmt.Errorf("passwords don't match: %v", err)
+	}
+
+	return ReturnedUser{
+		Id:    returnUser.Id,
+		Email: returnUser.Email,
+	}, nil
 }
 
 func (db *DB) GetChirps() ([]Chirp, error) {
@@ -149,7 +193,7 @@ func (db *DB) loadDB() (DBStructure, error) {
 
 	if len(data) == 0 {
 		newData.Chirps = map[int]Chirp{}
-		newData.Users = map[int]User{}
+		newData.Users = map[string]User{}
 		return newData, nil
 	}
 
