@@ -35,6 +35,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", apiCfg.HandlerRevokeToken)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.HandlerMetrics)
 	mux.HandleFunc("GET /api/reset", apiCfg.HandlerReset)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.HandlerChirpRedWebHook)
 
 	srv := &http.Server{
 		Addr:    ":" + port,

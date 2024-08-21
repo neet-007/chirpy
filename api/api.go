@@ -32,6 +32,39 @@ type ApiConfig struct {
 	jwtSecret      []byte
 }
 
+func (cfg *ApiConfig) HandlerChirpRedWebHook(w http.ResponseWriter, r *http.Request) {
+	type parammeter struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserId int `json:"user_id"`
+		} `json:"data"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parammeter{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		fmt.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if params.Event != "user.upgrade" {
+		return
+	}
+
+	err = cfg.db.MakeUserRed(params.Data.UserId)
+
+	if err != nil {
+		fmt.Printf("Error creating chirp value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
 func (cfg *ApiConfig) HandlerGetChirpById(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("chat_id")
 	if idStr == "" {

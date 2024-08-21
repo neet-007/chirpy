@@ -29,9 +29,10 @@ type Chirp struct {
 }
 
 type User struct {
-	Id       int
-	Email    string
-	Password string
+	Id          int
+	Email       string
+	Password    string
+	IsChirpyRed bool
 }
 
 type ReturnedUser struct {
@@ -39,6 +40,7 @@ type ReturnedUser struct {
 	Email        string `json:"email"`
 	Token        string `json:"token"`
 	RefreshToken string `json:"refresh_token"`
+	IsChirpyRed  bool   `json:"is_chirpy_red"`
 }
 
 type ReturnedUserJwt struct {
@@ -135,9 +137,10 @@ func (db *DB) CreateUser(email string, password string) (ReturnedUser, error) {
 	}
 
 	user := User{
-		Id:       len(dbStructure.Users) + 1,
-		Email:    email,
-		Password: string(hashedPassword),
+		Id:          len(dbStructure.Users) + 1,
+		Email:       email,
+		Password:    string(hashedPassword),
+		IsChirpyRed: false,
 	}
 
 	dbStructure.Users[user.Email] = user
@@ -148,8 +151,9 @@ func (db *DB) CreateUser(email string, password string) (ReturnedUser, error) {
 	}
 
 	return ReturnedUser{
-		Id:    user.Id,
-		Email: user.Email,
+		Id:          user.Id,
+		Email:       user.Email,
+		IsChirpyRed: user.IsChirpyRed,
 	}, nil
 }
 
@@ -208,12 +212,13 @@ func (db *DB) GetUser(email string, password string, expiresInSeconds int, secre
 		return ReturnedUser{}, nil
 	}
 
-	fmt.Printf("token %s\n", retrunToken)
+	fmt.Printf("user %v\n", returnUser)
 	return ReturnedUser{
 		Id:           returnUser.Id,
 		Email:        returnUser.Email,
 		Token:        retrunToken,
 		RefreshToken: refreshToken,
+		IsChirpyRed:  returnUser.IsChirpyRed,
 	}, nil
 }
 
@@ -404,6 +409,40 @@ func (db *DB) GetChirpById(id int) (Chirp, error) {
 
 }
 
+func (db *DB) MakeUserRed(id int) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	fmt.Println("maker user red")
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		fmt.Println("load ed error")
+		return err
+	}
+
+	returnUser, ok := dbStructure.UsersById[id]
+
+	if !ok {
+		fmt.Println("user not foudn")
+		return errors.New("user not found")
+	}
+
+	returnUser.IsChirpyRed = true
+	dbStructure.Users[returnUser.Email] = returnUser
+	dbStructure.UsersById[returnUser.Id] = returnUser
+
+	err = db.writeDB(dbStructure)
+
+	if err != nil {
+		fmt.Println("write error")
+		return err
+	}
+
+	fmt.Printf("%v\n", returnUser)
+	return nil
+
+}
+
 func (db *DB) DeleteChirp(id int, token string, secret []byte) error {
 	db.mux.Lock()
 	defer db.mux.Unlock()
@@ -450,7 +489,6 @@ func (db *DB) DeleteChirp(id int, token string, secret []byte) error {
 	}
 
 	return nil
-
 }
 
 // ensureDB creates a new database file if it doesn't exist
