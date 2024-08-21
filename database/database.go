@@ -1,6 +1,8 @@
 package database
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,9 +34,10 @@ type User struct {
 }
 
 type ReturnedUser struct {
-	Id    int    `json:"id"`
-	Email string `json:"email"`
-	Token string `json:"token"`
+	Id           int    `json:"id"`
+	Email        string `json:"email"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type ReturnedUserJwt struct {
@@ -42,9 +45,10 @@ type ReturnedUserJwt struct {
 	Email string `json:"email"`
 }
 type DBStructure struct {
-	Chirps    map[int]Chirp   `json:"chirps"`
-	Users     map[string]User `json:"users"`
-	UsersById map[int]User    `json:"users_by_id"`
+	Chirps    map[int]Chirp     `json:"chirps"`
+	Users     map[string]User   `json:"users"`
+	UsersById map[int]User      `json:"users_by_id"`
+	Tokens    map[string]string `json:"tokens"`
 }
 
 // NewDB creates a new database connection
@@ -160,12 +164,119 @@ func (db *DB) GetUser(email string, password string, expiresInSeconds int, secre
 		return ReturnedUser{}, err
 	}
 
+	c := 32
+	b := make([]byte, c)
+	_, err = rand.Read(b)
+	if err != nil {
+		fmt.Println("error:", err)
+		return ReturnedUser{}, err
+	}
+
+	refreshToken := hex.EncodeToString(b)
+
+	dbStructure.Tokens[refreshToken] = retrunToken
+
+	err = db.writeDB(dbStructure)
+
+	if err != nil {
+		return ReturnedUser{}, nil
+	}
+
 	fmt.Printf("token %s\n", retrunToken)
 	return ReturnedUser{
-		Id:    returnUser.Id,
-		Email: returnUser.Email,
-		Token: retrunToken,
+		Id:           returnUser.Id,
+		Email:        returnUser.Email,
+		Token:        retrunToken,
+		RefreshToken: refreshToken,
 	}, nil
+}
+
+func (db *DB) RefreshToken(refreshToken string, secret []byte, expiresInSeconds int) (string, error) {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return "", err
+	}
+
+	token, ok := dbStructure.Tokens[refreshToken]
+
+	if !ok {
+		return "", errors.New("token not found")
+	}
+
+	token_, err := jwt.ParseWithClaims(token, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	claims, ok := token_.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token_.Valid {
+		return "", errors.New("invalid token")
+	}
+
+	idStr := claims.Subject
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return "", err
+	}
+
+	timeNow := time.Now().UTC()
+
+	expiresAt := timeNow.Add(time.Duration(expiresInSeconds) * time.Second)
+
+	newToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		IssuedAt:  jwt.NewNumericDate(timeNow),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
+		Subject:   strconv.Itoa(id),
+	})
+
+	retrunToken, err := newToken.SignedString(secret)
+
+	if err != nil {
+		return "", err
+	}
+
+	dbStructure.Tokens[refreshToken] = retrunToken
+
+	err = db.writeDB(dbStructure)
+
+	if err != nil {
+		return "", err
+	}
+
+	return retrunToken, nil
+}
+
+func (db *DB) RevokeToken(token string) error {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	_, ok := dbStructure.Tokens[token]
+
+	if !ok {
+		return errors.New("token not found")
+	}
+
+	delete(dbStructure.Tokens, token)
+
+	err = db.writeDB(dbStructure)
+
+	if err != nil {
+		return errors.New("error writing db")
+	}
+
+	return nil
 }
 
 func (db *DB) UpdateUser(token string, secret []byte, email string, password string) (ReturnedUserJwt, error) {
@@ -285,6 +396,7 @@ func (db *DB) loadDB() (DBStructure, error) {
 		newData.Chirps = map[int]Chirp{}
 		newData.Users = map[string]User{}
 		newData.UsersById = map[int]User{}
+		newData.Tokens = map[string]string{}
 		return newData, nil
 	}
 

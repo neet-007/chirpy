@@ -146,9 +146,8 @@ func (cfg *ApiConfig) HandlerValidatePost(w http.ResponseWriter, r *http.Request
 
 func (cfg *ApiConfig) HandlerLogUser(w http.ResponseWriter, r *http.Request) {
 	type parammeter struct {
-		Email            string  `json:"email"`
-		Password         string  `json:"password"`
-		ExpiresInSeconds *string `json:"expires_in_seconds,omitempty"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 
 	decoder := json.NewDecoder(r.Body)
@@ -160,14 +159,8 @@ func (cfg *ApiConfig) HandlerLogUser(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	expiresInSeconds := 86400
+	expiresInSeconds := 3600
 
-	if params.ExpiresInSeconds != nil {
-		expiresInSecondsInt, err := strconv.Atoi(*params.ExpiresInSeconds)
-		if err == nil {
-			expiresInSeconds = expiresInSecondsInt
-		}
-	}
 	newData, err := cfg.db.GetUser(params.Email, params.Password, expiresInSeconds, cfg.jwtSecret)
 	if err != nil {
 		fmt.Printf("Error creating chirp value: %s", err)
@@ -185,6 +178,64 @@ func (cfg *ApiConfig) HandlerLogUser(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(json)
+}
+
+func (cfg *ApiConfig) HandlerRefreshToken(w http.ResponseWriter, r *http.Request) {
+	tokenHeader := r.Header.Get("Authorization")
+
+	if tokenHeader == "" {
+		fmt.Printf("no auth token")
+		return
+	}
+
+	tokenFields := strings.Fields(tokenHeader)
+	if len(tokenFields) != 2 {
+		fmt.Printf("auth token length is not 2")
+		return
+	}
+
+	expiresInSeconds := 3600
+	newData, err := cfg.db.RefreshToken(tokenFields[1], cfg.jwtSecret, expiresInSeconds)
+	if err != nil {
+		fmt.Printf("Error creating chirp value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	json, err := json.Marshal(newData)
+	if err != nil {
+		fmt.Printf("Error encoding return value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(json)
+}
+
+func (cfg *ApiConfig) HandlerRevokeToken(w http.ResponseWriter, r *http.Request) {
+	tokenHeader := r.Header.Get("Authorization")
+
+	if tokenHeader == "" {
+		fmt.Printf("no auth token")
+		return
+	}
+
+	tokenFields := strings.Fields(tokenHeader)
+	if len(tokenFields) != 2 {
+		fmt.Printf("auth token length is not 2")
+		return
+	}
+
+	err := cfg.db.RevokeToken(tokenFields[1])
+	if err != nil {
+		fmt.Printf("Error creating chirp value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (cfg *ApiConfig) HandlerUpdateUser(w http.ResponseWriter, r *http.Request) {
