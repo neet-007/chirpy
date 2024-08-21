@@ -5,10 +5,12 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/joho/godotenv"
 	"github.com/neet-007/chirpy/api"
 )
 
 func main() {
+	godotenv.Load()
 	const filepathRoot = "."
 	const port = "8080"
 
@@ -26,6 +28,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps/{chat_id}", apiCfg.HandlerGetChirpById)
 	mux.HandleFunc("POST /api/chirps", apiCfg.HandlerValidatePost)
 	mux.HandleFunc("POST /api/users", apiCfg.HandlerCreateUser)
+	mux.HandleFunc("PUT /api/users", apiCfg.HandlerUpdateUser)
 	mux.HandleFunc("POST /api/login", apiCfg.HandlerLogUser)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.HandlerMetrics)
 	mux.HandleFunc("GET /api/reset", apiCfg.HandlerReset)

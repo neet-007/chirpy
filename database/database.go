@@ -4,11 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/bcrypt"
 	"io/fs"
 	"os"
 	"sort"
+	"strconv"
 	"sync"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type DB struct {
@@ -28,13 +32,19 @@ type User struct {
 }
 
 type ReturnedUser struct {
-	Id    int
-	Email string
+	Id    int    `json:"id"`
+	Email string `json:"email"`
+	Token string `json:"token"`
 }
 
+type ReturnedUserJwt struct {
+	Id    int    `json:"id"`
+	Email string `json:"email"`
+}
 type DBStructure struct {
-	Chirps map[int]Chirp   `json:"chirps"`
-	Users  map[string]User `json:"users"`
+	Chirps    map[int]Chirp   `json:"chirps"`
+	Users     map[string]User `json:"users"`
+	UsersById map[int]User    `json:"users_by_id"`
 }
 
 // NewDB creates a new database connection
@@ -101,6 +111,7 @@ func (db *DB) CreateUser(email string, password string) (ReturnedUser, error) {
 	}
 
 	dbStructure.Users[user.Email] = user
+	dbStructure.UsersById[user.Id] = user
 	err = db.writeDB(dbStructure)
 	if err != nil {
 		return ReturnedUser{}, fmt.Errorf("writing db error %w", err)
@@ -112,7 +123,7 @@ func (db *DB) CreateUser(email string, password string) (ReturnedUser, error) {
 	}, nil
 }
 
-func (db *DB) GetUser(email string, password string) (ReturnedUser, error) {
+func (db *DB) GetUser(email string, password string, expiresInSeconds int, secretKey []byte) (ReturnedUser, error) {
 	db.mux.Lock()
 	defer db.mux.Unlock()
 
@@ -132,7 +143,86 @@ func (db *DB) GetUser(email string, password string) (ReturnedUser, error) {
 		return ReturnedUser{}, fmt.Errorf("passwords don't match: %v", err)
 	}
 
+	timeNow := time.Now().UTC()
+
+	expiresAt := timeNow.Add(time.Duration(expiresInSeconds) * time.Second)
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{
+		Issuer:    "chirpy",
+		IssuedAt:  jwt.NewNumericDate(timeNow),
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
+		Subject:   strconv.Itoa(returnUser.Id),
+	})
+
+	retrunToken, err := token.SignedString(secretKey)
+
+	if err != nil {
+		return ReturnedUser{}, err
+	}
+
+	fmt.Printf("token %s\n", retrunToken)
 	return ReturnedUser{
+		Id:    returnUser.Id,
+		Email: returnUser.Email,
+		Token: retrunToken,
+	}, nil
+}
+
+func (db *DB) UpdateUser(token string, secret []byte, email string, password string) (ReturnedUserJwt, error) {
+	db.mux.Lock()
+	defer db.mux.Unlock()
+
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return ReturnedUserJwt{}, err
+	}
+
+	token_, err := jwt.ParseWithClaims(token, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+
+	if err != nil {
+		return ReturnedUserJwt{}, err
+	}
+
+	claims, ok := token_.Claims.(*jwt.RegisteredClaims)
+	if !ok || !token_.Valid {
+		return ReturnedUserJwt{}, errors.New("invalid token")
+	}
+
+	idStr := claims.Subject
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return ReturnedUserJwt{}, err
+	}
+
+	returnUser, ok := dbStructure.UsersById[id]
+
+	if !ok {
+		return ReturnedUserJwt{}, errors.New("user not found")
+	}
+
+	if email != "" {
+		returnUser.Email = email
+	}
+	if password != "" {
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			return ReturnedUserJwt{}, err
+		}
+		returnUser.Password = string(hashedPassword)
+	}
+
+	dbStructure.UsersById[id] = returnUser
+	dbStructure.Users[email] = returnUser
+
+	err = db.writeDB(dbStructure)
+
+	if err != nil {
+		return ReturnedUserJwt{}, err
+	}
+
+	return ReturnedUserJwt{
 		Id:    returnUser.Id,
 		Email: returnUser.Email,
 	}, nil
@@ -194,6 +284,7 @@ func (db *DB) loadDB() (DBStructure, error) {
 	if len(data) == 0 {
 		newData.Chirps = map[int]Chirp{}
 		newData.Users = map[string]User{}
+		newData.UsersById = map[int]User{}
 		return newData, nil
 	}
 
@@ -207,13 +298,11 @@ func (db *DB) loadDB() (DBStructure, error) {
 
 // writeDB writes the database file to disk
 func (db *DB) writeDB(dbStructure DBStructure) error {
-	fmt.Println(dbStructure)
 	json_, err := json.Marshal(dbStructure)
 	if err != nil {
 		return fmt.Errorf("writing this %v error %w", dbStructure.Chirps, err)
 	}
 
-	fmt.Println(json_)
 	err = os.WriteFile(db.path, json_, 0666)
 
 	if err != nil {
