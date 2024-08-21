@@ -22,6 +22,7 @@ func NewApiConfig() (ApiConfig, error) {
 		fileserverHits: 0,
 		db:             db,
 		jwtSecret:      []byte(os.Getenv("JWT_SECRET")),
+		polkaApiKey:    os.Getenv("POLKA_API_KEY"),
 	}, nil
 
 }
@@ -30,6 +31,7 @@ type ApiConfig struct {
 	fileserverHits int
 	db             *database.DB
 	jwtSecret      []byte
+	polkaApiKey    string
 }
 
 func (cfg *ApiConfig) HandlerChirpRedWebHook(w http.ResponseWriter, r *http.Request) {
@@ -38,6 +40,29 @@ func (cfg *ApiConfig) HandlerChirpRedWebHook(w http.ResponseWriter, r *http.Requ
 		Data  struct {
 			UserId int `json:"user_id"`
 		} `json:"data"`
+	}
+
+	tokenHeader := r.Header.Get("Authorization")
+
+	if tokenHeader == "" {
+		fmt.Printf("no auth token\n")
+		return
+	}
+
+	tokenFields := strings.Fields(tokenHeader)
+	if len(tokenFields) != 2 {
+		fmt.Printf("auth token length is not 2\n")
+		return
+	}
+
+	if tokenFields[0] != "ApiKey" {
+		fmt.Printf("wrong header\n")
+		return
+	}
+
+	if tokenFields[1] != cfg.polkaApiKey {
+		fmt.Printf("wrong api key %s vs %s \n", tokenFields[1], cfg.polkaApiKey)
+		return
 	}
 
 	decoder := json.NewDecoder(r.Body)
