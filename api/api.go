@@ -3,9 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/neet-007/chirpy/database"
 	"net/http"
+	"strconv"
 	"strings"
+
+	"github.com/neet-007/chirpy/database"
 )
 
 func NewApiConfig() (ApiConfig, error) {
@@ -25,6 +27,39 @@ func NewApiConfig() (ApiConfig, error) {
 type ApiConfig struct {
 	fileserverHits int
 	db             *database.DB
+}
+
+func (cfg *ApiConfig) HandlerGetChirpById(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("chat_id")
+	if idStr == "" {
+		return
+	}
+
+	id, err := strconv.Atoi(idStr)
+
+	if err != nil {
+		return
+	}
+
+	chirp, err := cfg.db.GetChirpById(id)
+	if err != nil {
+		return
+	}
+
+	if chirp == (database.Chirp{}) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json_, err := json.Marshal(chirp)
+	if err != nil {
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(json_)
+	return
 }
 
 func (cfg *ApiConfig) HandlerValidatePost(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +122,41 @@ func (cfg *ApiConfig) HandlerValidatePost(w http.ResponseWriter, r *http.Request
 	CleanedBody := cleanProfane(params.Body)
 
 	newData, err := cfg.db.CreateChirp(CleanedBody)
+	fmt.Println(newData)
+	if err != nil {
+		fmt.Printf("Error creating chirp value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	json, err := json.Marshal(newData)
+	if err != nil {
+		fmt.Printf("Error encoding return value: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(json)
+}
+
+func (cfg *ApiConfig) HandlerCreateUser(w http.ResponseWriter, r *http.Request) {
+	type parammeter struct {
+		Body string `json:"email"`
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	params := parammeter{}
+	err := decoder.Decode(&params)
+
+	if err != nil {
+		fmt.Printf("Error decoding parameters: %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	newData, err := cfg.db.CreateUser(params.Body)
 	fmt.Println(newData)
 	if err != nil {
 		fmt.Printf("Error creating chirp value: %s", err)
